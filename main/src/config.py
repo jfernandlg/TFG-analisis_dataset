@@ -1,4 +1,6 @@
 
+#main/src/config.py
+
 
 import pandas as pd
 import numpy as np
@@ -9,8 +11,6 @@ import nltk
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 from nltk.stem import  WordNetLemmatizer
-nltk.download('punkt_tab')
-nltk.download('wordnet')
 
 def download_nltk_data():
     try:
@@ -21,10 +21,14 @@ def download_nltk_data():
         nltk.download('stopwords')
         print('datos nlkt necesarios ya descargados')
 
-download_nltk_data()
+def setup_environment():
+    download_nltk_data()
+    # Hace que todas gráficas se puedan ver igual en todos los notebooks
+    plt.style.use('ggplot')
 
-# Hace que todas gráficas se puedan ver igual en todos los notebooks
-plt.style.use('ggplot')
+if __name__ == '__main__':
+    setup_environment()
+
 
 
 
