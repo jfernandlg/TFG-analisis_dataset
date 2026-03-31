@@ -1,0 +1,28 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+library(reticulate)
+use_condaenv("dsfs2", required = TRUE)
+```
+
+
+Type any R code in the chunk, for example:
+```{r}
+#install.packages("here")
+library(here)
+library(readr)
+library(tidyverse)
+ruta <- here("main", "data", "processed", "imdb_with_sentiment.csv")
+
+datos <- read.csv(ruta, sep = ",")
+
+datos %>% glimpse()
+```
+```{r}
+
+```
+
