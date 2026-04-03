@@ -1,0 +1,54 @@
+---
+title: "R Notebook"
+output: html_document
+---
+
+```{r}
+library(here)
+library(readr)
+library(tidyverse)
+library(rsample)
+library(ISLR)
+library(caret)
+ruta <- here("main", "data", "processed", "imdb_with_sentiment.csv")
+
+data <- read.csv(ruta, sep = ",")
+
+data <- data %>%
+  mutate(Votes = as.numeric(gsub(",", "", Votes)),
+         Review.Count = as.numeric(gsub(",", "", Review.Count)))
+
+# data$Votes %>% as.numeric(gsub(",", "", data$Votes))
+
+data %>% glimpse()
+```
+```{r}
+data <- data %>%
+  select(-c(Title, Year, Director, Genre, Cast, Description, Review.Title, Review, metascore_missing, Metascore, reviews_tokenizadas))
+
+data %>% summary()
+```
+```{r}
+data |> select(, Rating) |> cor()
+```
+```{r}
+data$sentiment <- as.factor(data$sentiment)
+
+dmy <-  dummyVars(" ~ sentiment", data = data)
+data_2 <- data.frame(predict(dmy, newdata = data))
+
+data <- cbind(data, data_2)
+```
+
+```{r}
+data <- data %>% select(-sentiment)
+data %>% glimpse()
+```
+
+
+```{r}
+library(GGally)
+data %>%
+        ggpairs(progress = FALSE) +
+        theme_minimal()
+```
