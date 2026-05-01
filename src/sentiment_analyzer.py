@@ -11,9 +11,9 @@ analyzer = SentimentIntensityAnalyzer()   # Diccionario de palabras con polarida
 # -1: negativo
 # 0: neutral
 
-def get_sentiment(text: str) -> float:
+def get_sentiment(text: str):
     if not isinstance(text, str) or text.strip() == "":         # Comprueba que el texto pasado por parámetro no es un tipo text
-        return 0
+        return 0, 0.0
 
     value = analyzer.polarity_scores(text)                      # analiza el texto mediante el diccionario midiendo
                                                                 # la polaridad devolviendo un dict con 4 proporciones:
@@ -32,4 +32,4 @@ def get_sentiment(text: str) -> float:
         sentiment = 0                                           # sino es neutral
                                                                 # (-0.05, 0.05) umbrales de compound para clasificar
                                                                 # la polaridad en ambos extremos
-    return sentiment                                            # devuelve el sentimiento obtenido del texto
+    return sentiment, compound                                           # devuelve el sentimiento obtenido del texto

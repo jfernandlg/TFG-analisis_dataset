@@ -16,10 +16,10 @@ data <- read.csv(ruta, sep = ",")
 
 # Variable respuesta sentiment introducir valor compund
 data <- data %>%
-  rename(Duracion = Duration..min.) %>%
+  rename(Duration = Duration..min.) %>%
   mutate(Votes = as.numeric(gsub(",", "", Votes)),
          Review.Count = as.numeric(gsub(",", "", Review.Count))) %>%
-  mutate(across(c(Duracion, Review.Count, Votes, Rating, Metascore), ~ rescale(.x, to = c(0, 1))))
+  mutate(across(c(Duration, Review.Count, Votes, Rating, Metascore), ~ rescale(.x, to = c(0, 1))))
 
 # data$Votes %>% as.numeric(gsub(",", "", data$Votes))
 
@@ -27,12 +27,9 @@ data %>% glimpse()
 ```
 ```{r}
 data <- data %>%
-  select(-c(Title, Year, Director, Genre, Cast, Description, Review.Title, Review, metascore_missing, Metascore, reviews_tokenizadas))
+  select(-c(Title, Year, Director, Genre, Cast, Description, Review.Title, Review, metascore_missing, reviews_tokenizadas, Duration, sentiment))
 
 data %>% summary()
-```
-```{r}
-data |> select(, Rating) |> cor()
 ```
 ```{r}
 data$sentiment <- as.factor(data$sentiment)
@@ -44,7 +41,6 @@ data <- cbind(data, data_2)
 ```
 
 ```{r}
-data <- data %>% select(-sentiment)
 data %>% glimpse()
 ```
 
@@ -54,4 +50,30 @@ library(GGally)
 data %>%
         ggpairs(progress = FALSE) +
         theme_minimal()
+```
+```{r}
+dsplit <- data %>% initial_split(0.8, strata = compound)
+dtrain <- dsplit %>% training()
+dtest <- dsplit %>% testing()
+```
+```{r}
+m_mlr <- dtrain %>% lm(compound ~ Rating + Metascore + Votes, data = .)
+m_mlr %>% summary()
+```
+```{r}
+n <- length(dtrain$compound)
+p <- 3
+res <- m_mlr %>% residuals()
+RSS <- sum(res^2)
+data.frame(AIC = n*log(RSS/n) + 2*p,
+            BIC = n*log(RSS/n) + 2*log(n))
+```
+```{r}
+m0 <- dtrain %>% lm(compound ~ 1, data = .)
+mf <- dtrain %>% lm(compound ~ ., data = .)
+m_mlr_step <- m0 %>%
+        step(direction = "both", scope = list(lower = m0, upper = mf))
+m_mlr_step_BIC <- m0 %>%
+        step(direction = "both", scope = list(lower = m0, upper = mf), k = log(n))
+
 ```

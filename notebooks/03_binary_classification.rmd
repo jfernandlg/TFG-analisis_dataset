@@ -6,7 +6,7 @@ output: html_notebook
 
 ```{r}
 library(reticulate)
-use_condaenv("dsfs2", required = TRUE)
+#use_condaenv("dsfs2", required = TRUE)
 #install.packages("here")
 library(here)
 library(readr)
@@ -18,6 +18,10 @@ library(scales)
 library(pROC)
 library(randomForest)
 library(gbm)
+library(NeuralNetTools)
+library(nnet)
+library()
+
 ```
 ```{r}
 ruta <- here("main", "data", "processed", "imdb_with_sentiment.csv")
@@ -37,7 +41,7 @@ data %>% glimpse()
 ```
 ```{r}
 data <- data %>%
-  select(-c(Title, Year, Director, Genre, Cast, Description, Review.Title, Review, metascore_missing, reviews_tokenizadas))
+  select(-c(Title, Year, Director, Genre, Cast, Description, Review.Title, Review, metascore_missing, reviews_tokenizadas, Duration, compound))
 
 data %>% summary()
 ```
@@ -78,10 +82,10 @@ dtest <- dsplit %>% testing()
 dtrain$sentiment %>% table()
 ```
 ```{r}
-model <- dtrain %>%
-  glm(sentiment ~ . -Duration, data = ., family = "binomial")
+model_glm <- dtrain %>%
+  glm(sentiment ~ ., data = ., family = "binomial")
 
-model %>% summary()
+model_glm %>% summary()
 # Obtener un p-valor menor que 0.05 nos indica que la variable rating tiene un efecto significativo en el sentimiento,
 # es decir, a medida que aumenta el resto de variables significativas, aumenta la probabilidad de que el sentimiento sea positivo
 # entre las variables más signigicativas para el modelo de claseificación binominal tenemos, Rating, Votes y Review.Count
@@ -90,17 +94,17 @@ model %>% summary()
 dtest <- dtest %>%
   mutate(sentiment = factor(sentiment, levels = c("0", "1")))
 
-pred <- model %>% predict(newdata = dtest, type = "response")
+pred_glm <- model_glm %>% predict(newdata = dtest, type = "response")
 
-pred_class <- ifelse(pred > 0.5, "1", "0") %>%
+pred_class_glm <- ifelse(pred > 0.5, "1", "0") %>%
   factor(levels = levels(dtest$sentiment))
 ```
 ```{r}
-conf_m <- confusionMatrix(data = pred_class,
+pred_glm <- confusionMatrix(data = pred_class_glm,
                           reference = dtest$sentiment,
                           mode = "everything",
                           positive = "1")
-conf_m
+pred_glm
 
 # En cuanto a la matriz de confusión del modelo binominal podemos decir que:
 # El modelo tiene una tasa de 241 verderos positivos, respecto a los 201 de verdaderos negativos
@@ -127,7 +131,7 @@ conf_m
 
 ```
 ```{r}
-pred %>%
+pred_glm %>%
         roc(response = dtest$sentiment, plot = TRUE, auc = TRUE)
 
 # calculando el auc, la cual mide la capacidad del modelo para discriminar entre las clases, hemos obtenido una valor
@@ -142,12 +146,12 @@ pred %>%
 p <- ncol(dtrain) - 1
 B <- 1000
 model_Bag <- dtrain %>%
-        randomForest(sentiment ~ . -Duration, data = ., ntree = B, mtry = p, importance = TRUE)
+        randomForest(sentiment ~ ., data = ., ntree = B, mtry = p, importance = TRUE)
 
 model_Bag
 
 model_RF <- dtrain %>%
-        randomForest(sentiment ~ . -Duration, data = ., ntree = B, mtry = sqrt(p), importance = TRUE)
+        randomForest(sentiment ~ ., data = ., ntree = B, mtry = sqrt(p), importance = TRUE)
 
 model_RF
 #model %>% varImpPlot()
@@ -158,28 +162,29 @@ model_Bag %>% varImpPlot()
 model_RF %>%  varImpPlot()
 ```
 ```{r}
-model <- dtrain %>%
-  train(sentiment ~ . -Duration, data = ., method = "rf", metric = "Accuracy",
+m <- dtrain %>%
+  train(sentiment ~ ., data = ., method = "rf", metric = "Accuracy",
         trControl = trainControl(method = "cv", number = 10),
         tuneGrid = expand.grid(mtry = 1:p),
         ntree = B)
 
-model %>% plot()
-model$bestTune$mtry
+m %>% plot()
+m$bestTune$mtry
 ```
 ```{r}
+model_randomF <- dtrain %>%
+  randomForest(sentiment ~ ., data = ., mtry = m$bestTune$mtry, ntree = B, importance = TRUE)
 
-pred <- model %>%
-        predict(newdata = dtest, type = "prob")
-
-pred_class <- ifelse(pred[,2]>0.5, "1", "0") %>%
-        factor(levels = levels(dtest$sentiment))
-
-pred_class %>% confusionMatrix(reference = dtest$sentiment, mode = "everything", positive = "1")
-
+model_randomF
 ```
 ```{r}
-pred[,2] %>% roc(response = dtest$sentiment, plot = TRUE, auc = TRUE)
+pred_randomF <- model_randomF %>% predict(dtest, type = "class")
+pred_randomF %>% confusionMatrix(reference = dtest$sentiment, mode = "everything", positive = "1")
+```
+```{r}
+prob_randomF <- model_randomF %>% predict(dtest, type = "prob")
+prob_randomF[,2] %>% roc(response = dtest$sentiment, plot = TRUE, auc = TRUE)
+mean(prob_randomF != dtest$sentiment)
 ```
 ```{r}
 B <- 1000
@@ -193,7 +198,7 @@ lambda %>% plot()
 lambda$bestTune$shrinkage
 ```
 ```{r}
-model <- dtrain %>%
+model_gbm <- dtrain %>%
   mutate(
     sentiment = ifelse(sentiment == "1", 1, 0)
   ) %>%
@@ -202,15 +207,79 @@ model <- dtrain %>%
             n.minobsinnode = 10, verbose = FALSE,
             distribution = "bernoulli")
 
-model %>% summary()
+model_gbm %>% summary()
 ```
 ```{r}
-pred <- model %>% predict(dtest, type = "response")
-pred_new <- factor(ifelse(pred>0.5, "1", "0"))
-pred_new %>% confusionMatrix(reference = dtest$sentiment,
+pred_gbm <- model_gbm %>% predict(dtest, type = "response")
+pred_new_gbm <- factor(ifelse(pred>0.5, "1", "0"))
+pred_new_gbm %>% confusionMatrix(reference = dtest$sentiment,
                              mode = "everything", positive = "1")
+```
+```{r}
+pred_gbm %>% roc(response = dtest$sentiment, plot = TRUE, auc = TRUE)
+mean(pred_new_gbm != dtest$sentiment)
+```
+```{r}
+model_nn <- dtrain %>%
+        train(sentiment ~ ., data = ., method = "nnet", metric = "Accuracy",
+              trControl = trainControl(method = "cv", number = 10),
+              tuneGrid = expand.grid(size = 1:p, decay = c(0.01, 0.1, 0.5, 1)),
+              linout = FALSE, verbose = FALSE)
 
-pred %>% roc(response = dtest$sentiment, plot = TRUE, auc = TRUE)
-mean(pred_new != dtest$sentiment)
+model_nn$bestTune
+```
+```{r}
+m_nnet <- dtrain %>%
+        nnet(sentiment ~ ., data = ., size = model_nn$bestTune$size,
+             decay = model_nn$bestTune$decay, linout = FALSE)
+
+m_nnet %>% plotnet()
+```
+```{r}
+pred_nnet <- m_nnet %>% predict(dtest, type = "class") %>% as.factor()
+pred_nnet %>% confusionMatrix(reference = dtest$sentiment, mode = "everything", positive = "1")
+prob_nnet <- m_nnet %>% predict(dtest)
+```
+```{r}
+prob_nnet[,1] %>% roc(response = dtest$sentiment, plot = TRUE, auc = TRUE)
+mean(pred_nnet != dtest$sentiment)
+```
+```{r}
+cm_glm <- confusionMatrix(data = pred_class_glm, reference = dtest$sentiment, positive = "1")
+cm_RF <- confusionMatrix(data = pred_randomF, reference = dtest$sentiment, positive = "1")
+cm_gbm <- confusionMatrix(data = pred_new_gbm, reference = dtest$sentiment, positive = "1")
+cm_nnet <- confusionMatrix(data = pred_nnet, reference = dtest$sentiment, positive = "1")
+
+best_model_classification <- data.frame(
+        model = c("Regresion Logistica", "Random Forest", "Gradient Boosting", "Redes Neuronales"),
+        Precision = c(cm_glm$byClass['Precision'], cm_RF$byClass['Precision'], cm_gbm$byClass['Precision'], cm_nnet$byClass['Precision']),
+        Recall = c(cm_glm$byClass['Recall'], cm_RF$byClass['Recall'], cm_gbm$byClass['Recall'], cm_nnet$byClass['Recall']),
+        Specificity = c(cm_glm$byClass['Specificity'], cm_RF$byClass['Specificity'], cm_gbm$byClass['Specificity'], cm_nnet$byClass['Specificity'])
+)
+
+
+
+```
+```{r}
+get_metrics <- function(var, pred, model) {
+  cm <- confusionMatrix(pred, var)
+
+  data.frame(
+          Model = model,
+          Precision = cm$byClass['Precision'],
+          Recall = cm$byClass['Recall'],
+          Specificity = cm$byClass['Specificity']
+  )
+}
+
+metrics_glm <- get_metrics(dtest$sentiment, pred_glm, "LogReg")
+metrics_RF <- get_metrics(dtest$sentiment, pred_randomF, "RandomForest")
+metrics_gbm <- get_metrics(dtest$sentiment, pred_new_gbm, "GradientBoosting")
+metrics_nnet <- get_metrics(dtest$sentiment, pred_nnet, "NNet")
+
+all_metrics <- rbind(metrics_glm, metrics_RF, metrics_gbm, metrics_nnet)
+rownames(all_metrics) <- NULL
+print(all_metrics)
+
 ```
 
