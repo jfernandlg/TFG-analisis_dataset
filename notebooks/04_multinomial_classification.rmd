@@ -32,6 +32,8 @@ data %>% summary()
 
 ```
 ```{r}
-
+unique(data$Genre)
+```
+```{r}
 
 ```
