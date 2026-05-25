@@ -1,8 +1,3 @@
----
-title: "R Notebook"
-output: html_document
----
-
 ```{r}
 library(here)
 library(readr)
@@ -10,7 +5,24 @@ library(tidyverse)
 library(rsample)
 library(ISLR)
 library(caret)
-ruta <- here("main", "data", "processed", "imdb_with_sentiment.csv")
+library(dplyr)
+library(scales)
+library(GGally)
+library(lmtest)
+library(car)
+library(glmnet)
+library(broom)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(gbm)
+library(caret)
+library(nnet)
+library(NeuralNetTools)
+```
+
+```{r}
+ruta <- here("data", "processed", "imdb_with_sentiment.csv")
 
 data <- read.csv(ruta, sep = ",")
 
@@ -19,22 +31,24 @@ data <- data %>%
   rename(Duration = Duration..min.) %>%
   mutate(Votes = as.numeric(gsub(",", "", Votes)),
          Review.Count = as.numeric(gsub(",", "", Review.Count))) %>%
-  mutate(across(c(Duration, Review.Count, Votes, Rating, Metascore), ~ rescale(.x, to = c(0, 1))))
+  mutate(across(c(Duration, Review.Count, Votes, Rating, Metascore), ~rescale(.x, to = c(0, 1))))
 
 # data$Votes %>% as.numeric(gsub(",", "", data$Votes))
 
 data %>% glimpse()
 ```
+
 ```{r}
 data <- data %>%
   select(-c(Title, Year, Director, Genre, Cast, Description, Review.Title, Review, metascore_missing, reviews_tokenizadas, Duration, sentiment))
 
 data %>% summary()
 ```
+
 ```{r}
 data$sentiment <- as.factor(data$sentiment)
 
-dmy <-  dummyVars(" ~ sentiment", data = data)
+dmy <- dummyVars(" ~ sentiment", data = data)
 data_2 <- data.frame(predict(dmy, newdata = data))
 
 data <- cbind(data, data_2)
@@ -44,36 +58,275 @@ data <- cbind(data, data_2)
 data %>% glimpse()
 ```
 
+## Regresión Lineal Múltiple
+
+Las variables predictoras más significativas respecto a la de respuesta, compound, son Rating, Metascores y Votes.
 
 ```{r}
 library(GGally)
 data %>%
-        ggpairs(progress = FALSE) +
-        theme_minimal()
+  ggpairs(progress = FALSE) +
+  theme_minimal()
 ```
+
 ```{r}
 dsplit <- data %>% initial_split(0.8, strata = compound)
 dtrain <- dsplit %>% training()
 dtest <- dsplit %>% testing()
 ```
+
 ```{r}
 m_mlr <- dtrain %>% lm(compound ~ Rating + Metascore + Votes, data = .)
 m_mlr %>% summary()
 ```
+
+Determinamos los criterios de información AIC y BIC para encontrar el mejor modelo estadístico, un valor menor indicará cual será el modelo elegido
+
 ```{r}
 n <- length(dtrain$compound)
 p <- 3
 res <- m_mlr %>% residuals()
 RSS <- sum(res^2)
-data.frame(AIC = n*log(RSS/n) + 2*p,
-            BIC = n*log(RSS/n) + 2*log(n))
+data.frame(AIC = n * log(RSS / n) + 2 * p,
+           BIC = n * log(RSS / n) + 2 * log(n))
 ```
-```{r}
-m0 <- dtrain %>% lm(compound ~ 1, data = .)
-mf <- dtrain %>% lm(compound ~ ., data = .)
-m_mlr_step <- m0 %>%
-        step(direction = "both", scope = list(lower = m0, upper = mf))
-m_mlr_step_BIC <- m0 %>%
-        step(direction = "both", scope = list(lower = m0, upper = mf), k = log(n))
 
+```{r}
+m0 <- lm(compound ~ 1, data = dtrain)
+mf <- lm(compound ~ ., data = dtrain)
+
+m_mlr_step <- step(m0, direction = "both", scope = list(lower = m0, upper = mf))
+m_mlr_step_BIC <- step(m0, direction = "both", scope = list(lower = m0, upper = mf), k = log(nrow(dtrain)))
+
+```
+
+```{r}
+m_mlr_step_BIC %>% summary()
+```
+
+```{r}
+par(mfrow = c(2, 2))
+m_mlr_step_BIC %>% plot()
+```
+
+Realizamos el test de Durbin-Watson para comprobar la autocorrelación de los residuos del modelo. El test nos da lugar a dos hispótesis
+
+$H_0$: no hay autorrecoleación
+
+$H_1$: exite autocorrelación
+
+En este caso hemos obtenido un valor aproximado de 0, lo que nos hace indicar que exite una fuerte autocorrelació positiva, por tanto, rechazamos la hispótesis nula, ($H_0$)
+
+```{r}
+m_mlr_step_BIC %>% dwtest(alternative = "two.sided")
+```
+
+El test de Breusch-Pagan es utilzilizado para detectar la heterocedasticidad, es decir, si la varianza de los errores es constante o no. Este test nos resulta en dos hipótesis de nuevo:
+
+$H_0$: homocedasticidad (varianza constante de los errores)
+
+$H_1$: heterocedasticidad (varianza de los errores no es constante)
+
+En este caso, hemos obtenido un $p-valor$ menor a 0.05, luego, se rechaza la hipótesis nula y por tanto, nos indica que en nuestro modelo existe heterocedasticidad.
+
+```{r}
+m_mlr_step_BIC %>% bptest()
+```
+
+El VIF es utilizado para estudiar si es nuestro modelo existe multicolinealidad, es decir, cuando una variable independiente puede explicarse muy bien con otras variables independientes.
+
+En este caso, para cada una de las variables del modelo hemos obtenido valores en torno a 1, lo que nos hace indicar que no existe multicolinealidad.
+
+```{r}
+m_mlr_step_BIC %>% vif()
+```
+
+El rStudente es utilizado para buscar en nuestro modelo outliers, es decir, valores extremos.
+
+```{r}
+rStudent <- m_mlr_step_BIC %>% rstudent()
+data.frame(res = rStudent) %>%
+  ggplot() +
+  aes(x = seq_along(rStudent), y = abs(rStudent)) +
+  geom_point(aes(color = ifelse(abs(rStudent) > 3, "red", "black"))) +
+  geom_hline(yintercept = 3, color = "red", linetype = "dashed") +
+  scale_color_identity() +
+  labs(x = "", y = "|Student Residuals|") +
+  theme_minimal()
+```
+
+```{r}
+m_mlr_step_BIC %>%
+  influence.measures() %>%
+  summary()
+```
+
+```{r}
+df_lm <- data.frame(obs = dtest$compound, pred = m_mlr_step_BIC %>% predict(dtest)) %>%
+  summarise(
+    MAE = mean(abs(obs - pred)),
+    MSE = mean((obs - pred)^2),
+    RMSE = sqrt(MSE),
+    NRMSE = RMSE / mean(obs)
+  )
+
+df_lm
+```
+
+## REGRESIÓN LASSO
+
+```{r}
+lambda <- dtrain |> select(-compound) |> 
+  as.matrix() |> 
+  cv.glmnet(y = dtrain$compound, alpha = 1, nfolds = 10) |> 
+  plot()
+```
+
+```{r}
+m_lasso <- dtrain |> 
+  select(-compound) |> 
+  as.matrix() |> 
+  glmnet(y = dtrain$compound, alpha = 1, lambda = lambda$lambda.min)
+m_lasso |> tidy() |> arrange(desc(abs(estimate)))
+m_lasso |> plot(xvar = "lambda", label = TRUE)
+```
+
+```{r}
+df_lasso <- data.frame(
+  obs  = dtest$compound,
+  pred = as.numeric(predict(m_lasso, as.matrix(select(dtest, -compound))))
+) |> 
+  summarise(
+    MAE   = mean(abs(obs - pred)),
+    MSE   = mean((obs - pred)^2),
+    RMSE  = sqrt(MSE),
+    NRMSE = RMSE / mean(obs)
+  )
+
+df_lasso
+```
+
+## Random Forest
+
+```{r}
+m <- dtrain |> 
+  train(compound ~ .,
+        data = _,
+        method = "rf",
+        metric = "RMSE",
+        trControl = trainControl(method = "cv", number = 5),
+        tuneGrid = expand.grid(mtry = 1:p),
+        ntree = B,verbose = FALSE)
+m |> plot()
+m$bestTune$mtry
+```
+
+```{r}
+m_rf <- dtrain |> 
+  randomForest(compound ~ .,
+               data = _,
+               mtry = m$bestTune$mtry,
+               ntree = B,
+               importance = TRUE,
+               )
+
+m_rf |> varImpPlot()
+
+```
+
+```{r}
+df_rf <- data.frame(obs = dtest$compound,
+           pred = m_rf |> predict(dtest)) |> 
+   summarise(
+    MAE   = mean(abs(obs - pred)),
+    MSE   = mean((obs - pred)^2),
+    RMSE  = sqrt(MSE),
+    NRMSE = RMSE / mean(obs)
+  )
+
+df_rf
+```
+
+## Gradient Boosting
+
+```{r}
+lambda <- dtrain |> 
+  train(compound ~ .,
+        data = _,
+        method = "gbm",metric = "RMSE",distribution = "gaussian",
+        trControl = trainControl(method = "cv",number = 10),
+        tuneGrid = expand.grid(n.trees = B, interaction.depth = 2,
+                               shrinkage = c(0.001,0.01,0.1),n.minobsinnode = 10),verbose = FALSE)
+lambda |> plot()
+lambda$bestTune$shrinkage
+```
+
+```{r}
+m_gbm <- dtrain |> 
+  gbm(compound ~ ., 
+      data = _, distribution = "gaussian", 
+      n.trees = B, shrinkage = lambda$bestTune$shrinkage,
+      interaction.depth = 2,
+      n.minobsinnode = 10)
+m_gbm |> plot()
+```
+
+```{r}
+df_gbm <- data.frame(obs = dtest$compound, 
+           pred = m_gbm |> predict(dtest)) |> 
+  summarise(
+    MAE = mean(abs(obs-pred)),
+    MSE = mean((obs-pred)^2),
+    RMSE = sqrt(MSE),
+    NRMSE = RMSE/mean(obs)
+  )
+
+df_gbm
+```
+
+## Redes Neuronales
+
+```{r}
+p <- ncol(dtrain) - 1
+K <- dtrain |> 
+  train(compound ~ ., data = _,
+        method = "nnet", metric = "RMSE",
+        trControl = trainControl(method = "cv", number = 10),
+        tuneGrid = expand.grid(size = 1:p, decay = c(0.01, 0.1, 0.5)),
+        lineout = TRUE, verbose = FALSE)
+K |> plot()
+K$bestTune
+```
+
+```{r}
+m_nnet <- dtrain |> 
+  nnet(compound ~ ., data = _, 
+       size = K$bestTune$size,
+       decay = K$bestTune$decay,
+       lineout = TRUE)
+m_nnet |> plotnet()
+```
+
+```{r}
+df_nnet <- data.frame(obs = dtest$compound, 
+           pred = m_nnet |> predict(dtest)) |> 
+  summarise(
+    MAE = mean(abs(obs-pred)),
+    MSE = mean((obs-pred)^2),
+    RMSE = sqrt(MSE),
+    NRMSE = RMSE/mean(obs)
+  )
+
+df_nnet
+```
+
+```{r}
+best_model_regression <- data.frame(
+  model = c("Lineal Multiple", "Lasso", "Random Forest", "Gradient Boosting", "Neural Network"),
+  MAE = c(df_lm$MAE, df_lasso$MAE, df_rf$MAE, df_gbm$MAE, df_nnet$MAE),
+  RMSE = c(df_lm$RMSE, df_lasso$RMSE, df_rf$RMSE, df_gbm$RMSE, df_nnet$RMSE),
+  NRMSE = c(df_lm$NRMSE, df_lasso$NRMSE, df_rf$NRMSE, df_gbm$NRMSE, df_nnet$NRMSE)
+)
+
+best_model_regression
 ```
